@@ -1,0 +1,203 @@
+apiVersion: v1
+kind: Template
+metadata:
+  name: urbancode-deploy-agent-relay
+  annotations:
+    openshift.io/display-name: "UrbanCode Deploy Agent Relay"
+    openshift.io/provider-display-name: "HCL and IBM"
+    openshift.io/documentation-url: "https://www.ibm.com/support/knowledgecenter/en/SS4GSP_7.0.2/com.ibm.udeploy.doc/ucd_version_welcome.html" 
+    openshift.io/support-url: "https://www.ibm.com/support"
+    description:  "7.0.2.1"
+objects:
+- apiVersion: apps/v1
+  kind: StatefulSet
+  metadata:
+    generation: 3
+    labels:
+      app: ${APPLICATION_NAME}
+    name: ${APPLICATION_NAME}
+  spec:
+    podManagementPolicy: OrderedReady
+    replicas: 1
+    revisionHistoryLimit: 10
+    selector:
+      matchLabels:
+        app: ${APPLICATION_NAME}
+    serviceName: ${APPLICATION_NAME}-hl
+    template:
+      metadata:
+        labels:
+          app: ${APPLICATION_NAME}
+      spec:
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: beta.kubernetes.io/arch
+                  operator: In
+                  values:
+                  - amd64
+        containers:
+        - env:
+          - name: JMS_PROXY_SERVER
+            value: ${JMS_PROXY_SERVER}
+          - name: CODESTATION_ENABLE_REPLICATION
+            value: ${CODESTATION_ENABLE_REPLICATION}
+          - name: CODESTATION_PERSIST_CACHE
+            value: ${CODESTATION_PERSIST_CACHE}
+          - name: CODESTATION_MAX_CACHE_SIZE
+            value: ${CODESTATION_MAX_CACHE_SIZE}
+          - name: CODESTATION_SERVER_URL
+            value: ${CODESTATION_SERVER_URL}
+          - name: CODESTATION_SERVER_PASSWORD
+            value: ${CODESTATION_SERVER_PASSWORD}
+          - name: CODESTATION_GEOTAGS
+            value: ${CODESTATION_GEOTAGS}
+          image: ${IMAGE_REPOSITORY}:${IMAGE_TAG}-x86_64
+          imagePullPolicy: ${IMAGE_PULL_POLICY}
+          name: ${APPLICATION_NAME}
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+          - mountPath: /opt/ibm-ucd/agentrelay/configs
+            name: ${APPLICATION_NAME}-conf
+        restartPolicy: Always
+        schedulerName: default-scheduler
+        securityContext: {}
+        terminationGracePeriodSeconds: 30
+        volumes:
+        - name: ${APPLICATION_NAME}-conf
+          peristentVolumeClaim:
+            claimName: ${EXISTING_CLAIM_NAME}
+        dnsPolicy: ClusterFirst
+        imagePullSecrets:
+        - name: ${IMAGE_PULL_SECRET}
+    updateStrategy:
+      rollingUpdate:
+        partition: 0
+      type: RollingUpdate
+- apiVersion: v1
+  kind: Service
+  metadata:
+    labels:
+      app: ${APPLICATION_NAME}
+    name: ${APPLICATION_NAME}
+  spec:
+    externalTrafficPolicy: Cluster
+    ports:
+    - name: jms
+      port: 7916
+      protocol: TCP
+      targetPort: 7916
+    - name: http-proxy
+      port: 20080
+      protocol: TCP
+      targetPort: 20080
+    - name: codestation
+      port: 20081
+      protocol: TCP
+      targetPort: 20081
+    selector:
+      app: ${APPLICATION_NAME}
+    sessionAffinity: ClientIP
+    sessionAffinityConfig:
+      clientIP:
+        timeoutSeconds: 10800
+    type: NodePort
+- apiVersion: v1
+  kind: Service
+  metadata:
+    labels:
+      app: ${APPLICATION_NAME}
+    name: ${APPLICATION_NAME}-hl
+  spec:
+    clusterIP: None
+    ports:
+    - name: jms
+      port: 7916
+      protocol: TCP
+      targetPort: 7916
+    - name: http-proxy
+      port: 20080
+      protocol: TCP
+      targetPort: 20080
+    - name: codestation
+      port: 20081
+      protocol: TCP
+      targetPort: 20081
+    selector:
+      app: ${APPLICATION_NAME}
+    sessionAffinity: None
+    type: ClusterIP
+parameters:
+  - name: APPLICATION_NAME
+    displayName: Application Name
+    description: Unique name for UrbanCode Deploy running in this project
+    value: ""
+    required: true
+  - name: IMAGE_REPOSITORY
+    displayName: Image repository
+    description: Name of image, including repository prefix (if required)
+    value: "ucd-server/ucda" 
+    required: true 
+  - name: IMAGE_TAG
+    displayName: Docker image tag
+    description: Docker image tag
+    value: "7.0.2.1.1013966"
+    required: true
+  - name: IMAGE_PULL_POLICY
+    displayName: Docker image pull policy
+    description: Image pull policy (Valid values are Always, Never or IfNotPresent)  Defaults to Always if latest tag is specified, or IfNotPresent otherwise
+    value: "Always"
+    required: true
+  - name: IMAGE_PULL_SECRET
+    displayName: Image pull secret
+    description: An image pull secret used to authenticate with the image registry
+    value: ""
+    required: false
+  - name: JMS_PROXY_SERVER
+    displayName: JMS Proxy Server
+    description: "UrbanCode Deploy Server hostname and JMS port in the form hostname:port.  If specifying failover info, separate multiple hostname:port with a comma.  For example, ucd1.example.com:7918,ucd2.example.com:7918"
+    value: ""
+    required: true
+  - name: CODESTATION_ENABLE_REPLICATION
+    displayName: Code Station Replication
+    description: "Specify true to enable artifact caching on the relay."
+    value: "false"
+    required: true
+  - name: CODESTATION_PERSIST_CACHE
+    displayName: Code Station Persist Cache
+    description: "Specify true to persist the artifact cache when the relay container is restarted."
+    value: "false"
+    required: true
+  - name: CODESTATION_MAX_CACHE_SIZE
+    displayName: Code Station Max Cache Size
+    description: "The size to which to limit the artifact cache, such as 500M for 500 MB or 5G for 5 GB.  To not put a limit on the cache, specify none."
+    value: "None"
+    required: false
+  - name: CODESTATION_SERVER_URL
+    displayName: Code Station Server URL
+    description: "The full URL of the central UCD Server to connect to, such as https://myserver.example.com:8443"
+    value: ""
+    required: false
+  - name: CODESTATION_SERVER_PASSWORD
+    displayName: Code Station Server Password
+    description: "An authentication token created by the UCD Server"
+    value: ""
+    required: false
+  - name: CODESTATION_GEOTAGS
+    displayName: Code Station Geotags
+    description: "If you choose to cache files on the relay, you can specify one or more component version statuses here, separated by semicolons. The agent relay automatically caches component versions with any of these statuses so that those versions are ready when they are needed for a deployment. A status can contain a space except in the first or last position. A status can contain commas. The special * status replicates all artifacts, but use this status with caution, because it can make the agent relay store a large amount of data. If no value is specified, no component versions are cached automatically."
+    value: ""
+    required: false
+  - name: PERSISTENT_VOLUME_SIZE
+    displayName: Persistent Volume Size
+    description:  Size of storage needed to persist Agent Relay configuration data and cache (if necessary)
+    value: "10Mi"
+    required: true
+  - name: EXISTING_CLAIM_NAME
+    description:  "Name of persistent storage"
+    value: ""
+    required: false
